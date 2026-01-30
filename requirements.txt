@@ -1,0 +1,14 @@
+## `requirements.txt`
+```
+# Core dependencies
+requests>=2.31.0
+scipy>=1.11.0
+numpy>=1.24.0
+python-dateutil>=2.8.2
+
+# Soccer-specific
+# (agregar cuando implementemos soccer adapter)
+
+# Future
+# fastapi>=0.104.0  # Para UI
+# uvicorn>=0.24.0
