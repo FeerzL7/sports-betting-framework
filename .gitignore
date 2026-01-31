@@ -1,5 +1,3 @@
-## `.gitignore`
-```
 # Python
 __pycache__/
 *.py[cod]
@@ -16,12 +14,15 @@ venv/
 *.swp
 *.swo
 
-# Config
-config.py
+# Config & Secrets
+config/api_keys.py
 .env
+*.env
+secrets/
 
 # Outputs
 output/
+logs/
 *.csv
 *.json
 *.log
@@ -29,6 +30,8 @@ output/
 # OS
 .DS_Store
 Thumbs.db
-```
 
----
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
