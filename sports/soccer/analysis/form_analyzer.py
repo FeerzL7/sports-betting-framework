@@ -9,6 +9,10 @@ MÉTRICAS:
 """
 from typing import Dict, List
 from config.soccer_config import DEFAULT_SOCCER_CONFIG
+from utils import get_logger
+
+# Setup logger
+logger = get_logger(__name__)
 
 
 class FormAnalyzer:
@@ -37,7 +41,16 @@ class FormAnalyzer:
             }
         """
         if not matches:
+            logger.warning(
+                "No matches provided for form analysis",
+                extra={"team_id": team_id}
+            )
             return FormAnalyzer._get_default_form()
+        
+        logger.debug(
+            f"Analyzing form for team {team_id}",
+            extra={"team_id": team_id, "matches_count": len(matches)}
+        )
         
         wins = 0
         draws = 0
@@ -68,7 +81,7 @@ class FormAnalyzer:
         
         games = len(matches)
         
-        return {
+        form_result = {
             "games_analyzed": games,
             "win_rate": round(wins / games, 3),
             "draw_rate": round(draws / games, 3),
@@ -79,6 +92,18 @@ class FormAnalyzer:
                 wins, draws, games
             )
         }
+        
+        logger.info(
+            f"Form analysis complete",
+            extra={
+                "team_id": team_id,
+                "games": games,
+                "win_rate": form_result["win_rate"],
+                "form_strength": form_result["form_strength"]
+            }
+        )
+        
+        return form_result
     
     @staticmethod
     def _calculate_form_strength(wins: int, draws: int, games: int) -> float:
@@ -91,11 +116,24 @@ class FormAnalyzer:
         points = (wins * 3) + (draws * 1)
         max_points = games * 3
         
-        return round(points / max_points, 3) if max_points > 0 else 0.5
+        strength = round(points / max_points, 3) if max_points > 0 else 0.5
+        
+        logger.debug(
+            f"Form strength calculated: {strength:.3f}",
+            extra={
+                "wins": wins,
+                "draws": draws,
+                "games": games,
+                "points": points
+            }
+        )
+        
+        return strength
     
     @staticmethod
     def _get_default_form() -> Dict:
         """Form por default si no hay datos"""
+        logger.debug("Using default form values")
         return {
             "games_analyzed": 0,
             "win_rate": 0.33,  # Asumimos 33% (promedio liga)
@@ -128,7 +166,7 @@ class FormAnalyzer:
             away_form["goals_per_game"]
         ) / 2
         
-        return {
+        comparison = {
             "home_advantage_form": round(form_diff, 3),
             "total_expected_goals": round(total_goals, 2),
             "high_scoring_likely": total_goals > 3.0,
@@ -137,3 +175,15 @@ class FormAnalyzer:
                 away_form["clean_sheets_pct"] > 0.4
             )
         }
+        
+        logger.info(
+            "Form comparison complete",
+            extra={
+                "home_strength": home_strength,
+                "away_strength": away_strength,
+                "form_diff": form_diff,
+                "high_scoring": comparison["high_scoring_likely"]
+            }
+        )
+        
+        return comparison

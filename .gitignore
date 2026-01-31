@@ -20,8 +20,6 @@ config/api_keys.py
 *.env
 secrets/
 
-tests/
-*.py
 
 # Outputs
 output/
