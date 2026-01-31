@@ -7,6 +7,9 @@ Su ÚNICA responsabilidad es detectar edge.
 from abc import ABC, abstractmethod
 from typing import Optional
 from core.models import GameAnalysis, OddsData, Pick, MarketType
+from utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class Market(ABC):
@@ -60,8 +63,18 @@ class Market(ABC):
         
         Override en subclases para validaciones específicas
         """
-        return (
-            analysis is not None and
-            odds is not None and
-            analysis.game_id == odds.game_id
-        )
+        if analysis is None or odds is None:
+            logger.warning("Missing analysis or odds data")
+            return False
+        
+        if analysis.game_id != odds.game_id:
+            logger.error(
+                "Game ID mismatch",
+                extra={
+                    "analysis_id": analysis.game_id,
+                    "odds_id": odds.game_id
+                }
+            )
+            return False
+        
+        return True
