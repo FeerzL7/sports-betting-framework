@@ -15,13 +15,10 @@ NO ES RESPONSABLE DE:
 """
 import requests
 from typing import Dict, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 import time
-from sports.soccer.config import (
-    API_FOOTBALL_KEY,
-    API_FOOTBALL_BASE_URL,
-    SUPPORTED_LEAGUES
-)
+from config.soccer_config import SUPPORTED_SOCCER_LEAGUES
+from config.api_keys import get_api_config
 
 
 class APIFootballClient:
@@ -34,17 +31,22 @@ class APIFootballClient:
     def __init__(self, api_key: Optional[str] = None):
         """
         Args:
-            api_key: API key (usa config.py si no se provee)
+            api_key: API key (usa config si no se provee)
         """
-        self.api_key = api_key or API_FOOTBALL_KEY
-        self.base_url = API_FOOTBALL_BASE_URL
+        # Get config from centralized location
+        api_config = get_api_config("api_football")
+        
+        self.api_key = api_key or api_config["api_key"]
+        self.base_url = api_config["base_url"]
+        self.rate_limit = api_config["rate_limit"]
+        
         self.headers = {
             "X-Auth-Token": self.api_key
         }
         
         # Rate limiting
         self.last_request_time = 0
-        self.min_request_interval = 6.0  # 10 req/min = 1 cada 6 segundos
+        self.min_request_interval = 60.0 / self.rate_limit  # seconds per request
     
     def _make_request(self, endpoint: str, params: Optional[Dict] = None) -> Dict:
         """
@@ -111,10 +113,8 @@ class APIFootballClient:
                 ...
             ]
         """
-        if league_code not in SUPPORTED_LEAGUES:
+        if league_code not in SUPPORTED_SOCCER_LEAGUES:
             raise ValueError(f"Liga '{league_code}' no soportada")
-        
-        league_id = SUPPORTED_LEAGUES[league_code]["id"]
         
         # Construir filtro de fecha
         if date is None:
@@ -166,9 +166,6 @@ class APIFootballClient:
             # Agregar stats desde partidos
             total_goals_for = 0
             total_goals_against = 0
-            total_shots = 0
-            total_shots_on_target = 0
-            total_possession = 0
             games_count = len(matches)
             
             for match in matches:
@@ -180,9 +177,6 @@ class APIFootballClient:
                 else:
                     total_goals_for += match["score"]["fullTime"]["away"]
                     total_goals_against += match["score"]["fullTime"]["home"]
-                
-                # Stats adicionales (si disponibles en API)
-                # NOTA: Plan gratuito puede no tener todas estas stats
             
             return {
                 "goals_per_game": round(total_goals_for / games_count, 2),

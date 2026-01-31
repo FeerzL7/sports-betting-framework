@@ -26,8 +26,12 @@ from config.soccer_config import (
     DEFAULT_SOCCER_CONFIG
 )
 
-# API keys imported separately (not in __all__ for security)
-from config.api_keys import API_KEYS
+from config.api_keys import (
+    API_KEYS,
+    validate_api_keys,
+    is_provider_configured,
+    get_api_config
+)
 
 __all__ = [
     # Core
@@ -41,6 +45,9 @@ __all__ = [
     'SUPPORTED_SOCCER_LEAGUES',
     'DEFAULT_SOCCER_CONFIG',
     
-    # API Keys (use carefully)
-    'API_KEYS'
+    # API Keys
+    'API_KEYS',
+    'validate_api_keys',
+    'is_provider_configured',
+    'get_api_config'
 ]

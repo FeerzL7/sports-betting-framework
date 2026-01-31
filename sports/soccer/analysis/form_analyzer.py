@@ -8,7 +8,7 @@ MÉTRICAS:
 - Clean sheets rate
 """
 from typing import Dict, List
-from sports.soccer.config import FORM_WINDOW
+from config.soccer_config import DEFAULT_SOCCER_CONFIG
 
 
 class FormAnalyzer:

@@ -14,11 +14,11 @@ IMPORTANTE:
 - Ajustar por opponent quality
 - Incluir home advantage
 """
-from typing import List,Dict
-from sports.soccer.config import (
-    XG_WEIGHTS,
-    LEAGUE_BASELINE_GOALS,
-    HOME_ADVANTAGE
+from typing import List, Dict
+from config.soccer_config import (
+    get_league_baseline,
+    get_home_advantage,
+    DEFAULT_SOCCER_CONFIG
 )
 
 
@@ -36,7 +36,8 @@ class ExpectedGoalsCalculator:
             league_code: "PL", "PD", "SA", etc.
         """
         self.league_code = league_code
-        self.baseline = LEAGUE_BASELINE_GOALS.get(league_code, 2.7)
+        self.baseline = get_league_baseline(league_code)
+        self.home_advantage = get_home_advantage(league_code)
     
     def calculate(
         self,
@@ -77,9 +78,9 @@ class ExpectedGoalsCalculator:
         
         # 4. Ajuste por localía
         if is_home:
-            xg *= HOME_ADVANTAGE
+            xg *= self.home_advantage
         else:
-            xg /= HOME_ADVANTAGE
+            xg /= self.home_advantage
         
         # 5. Clipping: xG debe estar en rango realista
         xg = max(0.3, min(xg, 4.0))
@@ -115,7 +116,7 @@ class ExpectedGoalsCalculator:
         
         # Calcular goles promedio ponderados por recencia
         team_goals = []
-        weights = [1.5, 1.3, 1.1, 1.0, 0.9]  # Más reciente = más peso
+        weights = DEFAULT_SOCCER_CONFIG.form_weights
         
         for i, match in enumerate(team_form[:5]):
             weight = weights[i] if i < len(weights) else 0.8
@@ -154,8 +155,8 @@ class ExpectedGoalsCalculator:
         
         # Ajuste por localía
         if is_home:
-            xg *= HOME_ADVANTAGE
+            xg *= self.home_advantage
         else:
-            xg /= HOME_ADVANTAGE
+            xg /= self.home_advantage
         
         return round(xg, 2)
