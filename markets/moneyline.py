@@ -83,9 +83,22 @@ class MoneylineMarket(Market):
             best_pick = None
             best_edge = self.min_edge
             
+            # Map analysis probability keys to market outcome keys
+            prob_key_map = {
+                "home": ["home", "home_win"],
+                "away": ["away", "away_win"],
+                "draw": ["draw"]
+            }
+            
             for outcome in ["home", "away", "draw"]:
-                # Check if outcome exists in both
-                if outcome not in real_probs:
+                # Find probability with flexible key matching
+                real_prob = None
+                for prob_key in prob_key_map[outcome]:
+                    if prob_key in real_probs:
+                        real_prob = real_probs[prob_key]
+                        break
+                
+                if real_prob is None:
                     continue
                 
                 # Map outcome to odds key
@@ -93,7 +106,6 @@ class MoneylineMarket(Market):
                 if odds_key not in market_odds or market_odds[odds_key] is None:
                     continue
                 
-                real_prob = real_probs[outcome]
                 outcome_odds = market_odds[odds_key]
                 
                 # Calculate edge
@@ -170,9 +182,11 @@ class MoneylineMarket(Market):
             )
             return False
         
-        # Check required outcomes
-        required = ["home", "away"]
-        if not all(outcome in analysis.probabilities for outcome in required):
+        # Check required outcomes (flexible key matching)
+        has_home = any(k in analysis.probabilities for k in ["home", "home_win"])
+        has_away = any(k in analysis.probabilities for k in ["away", "away_win"])
+        
+        if not (has_home and has_away):
             logger.warning(
                 "Missing required outcomes in probabilities",
                 extra={
