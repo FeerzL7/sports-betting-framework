@@ -20,7 +20,11 @@ logger = get_logger(__name__)
 
 
 def create_mock_analysis() -> GameAnalysis:
-    """Create mock GameAnalysis for testing"""
+    """Create mock GameAnalysis for testing
+    
+    Simula output real de ProbabilityEngine.from_poisson()
+    que usa claves "home_win" / "away_win" (no "home"/"away")
+    """
     return GameAnalysis(
         sport=Sport.SOCCER,
         league="PL",
@@ -29,7 +33,7 @@ def create_mock_analysis() -> GameAnalysis:
         away_team="Chelsea",
         start_time=datetime.now(),
         probabilities={
-            "home_win": 0.45,
+            "home_win": 0.45,   # Formato real de from_poisson
             "draw": 0.28,
             "away_win": 0.27
         },
@@ -66,132 +70,166 @@ def create_mock_odds(
 
 
 def test_moneyline_with_value():
-    """Test 1: Moneyline con valor (edge positivo)"""
+    """Test 1: Moneyline con valor (edge positivo)
+    
+    SCENARIO:
+        home_win real = 45%
+        home_odds = 2.30 → implied = 43.48%
+        raw_edge = 0.45 - 0.4348 = +0.0152
+        normalized = 0.0152 / 0.03 (MONEYLINE efficiency) = 0.507
+        → Edge claramente positivo, debe generar Pick
+    """
     print("\n" + "="*60)
     print("TEST 1: Moneyline - Valor Positivo")
     print("="*60)
     
     analysis = create_mock_analysis()
-    # Odds favorables: home tiene 45% real pero odds implican ~45.5%
-    odds = create_mock_odds(home_odds=2.20)  # implica 45.5%
+    # home_odds=2.30 → implied 43.5% vs real 45% → edge positivo
+    odds = create_mock_odds(home_odds=2.30)
     
     market = MoneylineMarket(min_edge=0.02)
     pick = market.evaluate(analysis, odds)
     
-    if pick:
-        print(f"✅ Pick generado:")
-        print(f"   Selection: {pick.selection}")
-        print(f"   Odds: {pick.odds}")
-        print(f"   Probability: {pick.probability:.2%}")
-        print(f"   Edge: {pick.edge:.4f}")
-        print(f"   Confidence: {pick.confidence:.1%}")
-        assert pick.market == MarketType.MONEYLINE
-        assert pick.selection in ["home", "away", "draw"]
-    else:
-        print("ℹ️  No value found (expected - odds too tight)")
+    assert pick is not None, (
+        "Debe generar Pick: home tiene 45% real vs 43.5% implícita (edge positivo)"
+    )
+    assert pick.selection == "home", f"Debe ser home, got {pick.selection}"
+    assert pick.edge > 0.02, f"Edge debe ser > 0.02, got {pick.edge}"
+    assert pick.market == MarketType.MONEYLINE
+    
+    print(f"✅ Pick generado:")
+    print(f"   Selection: {pick.selection}")
+    print(f"   Odds: {pick.odds}")
+    print(f"   Probability: {pick.probability:.2%}")
+    print(f"   Edge: {pick.edge:.4f}")
+    print(f"   Confidence: {pick.confidence:.1%}")
 
 
 def test_moneyline_without_value():
-    """Test 2: Moneyline sin valor (edge negativo)"""
+    """Test 2: Moneyline sin valor (edge negativo)
+    
+    SCENARIO:
+        home_win real = 45%
+        home_odds = 1.70 → implied = 58.8%
+        raw_edge = 0.45 - 0.588 = -0.138 (muy negativo)
+        → No debe generar Pick en ningún outcome
+    """
     print("\n" + "="*60)
     print("TEST 2: Moneyline - Sin Valor")
     print("="*60)
     
     analysis = create_mock_analysis()
-    # Odds desfavorables: home tiene 45% pero odds implican 58.8%
-    odds = create_mock_odds(home_odds=1.70)
+    # Todas las odds muy ajustadas (alta vigorish), sin valor en ningún outcome
+    odds = create_mock_odds(
+        home_odds=1.70,   # implied 58.8% vs real 45% → negativo
+        draw_odds=2.80,   # implied 35.7% vs real 28% → negativo
+        away_odds=2.90    # implied 34.5% vs real 27% → negativo
+    )
     
     market = MoneylineMarket(min_edge=0.02)
     pick = market.evaluate(analysis, odds)
     
-    if pick:
-        print(f"❌ Unexpected pick generated: {pick.selection}")
-        raise AssertionError("Should not generate pick with negative edge")
-    else:
-        print("✅ Correctly rejected (no value)")
+    assert pick is None, f"No debe generar pick con edge negativo, got {pick.selection}"
+    print("✅ Correctly rejected (no value)")
 
 
 def test_moneyline_best_edge():
-    """Test 3: Moneyline selecciona mejor edge"""
+    """Test 3: Moneyline selecciona mejor edge entre outcomes
+    
+    SCENARIO:
+        home: 45% real vs odds 2.00 (implied 50%) → edge negativo
+        away: 27% real vs odds 4.20 (implied 23.8%) → edge positivo (mejor)
+        draw: 28% real vs odds 3.50 (implied 28.6%) → edge negativo
+        → Debe seleccionar away (único con edge positivo)
+    """
     print("\n" + "="*60)
     print("TEST 3: Moneyline - Mejor Edge")
     print("="*60)
     
     analysis = create_mock_analysis()
-    # Away tiene mejor value: 27% prob pero odds implican 23.8%
     odds = create_mock_odds(
-        home_odds=2.00,   # implica 50% (peor que 45%)
-        away_odds=4.20    # implica 23.8% (mejor que 27%)
+        home_odds=2.00,   # implied 50% vs real 45% → negativo
+        draw_odds=3.50,   # implied 28.6% vs real 28% → negativo
+        away_odds=4.20    # implied 23.8% vs real 27% → positivo ✓
     )
     
     market = MoneylineMarket(min_edge=0.02)
     pick = market.evaluate(analysis, odds)
     
-    if pick:
-        print(f"✅ Pick generado: {pick.selection}")
-        assert pick.selection == "away", f"Should pick away, got {pick.selection}"
-        print(f"   Edge: {pick.edge:.4f}")
-    else:
-        print("⚠️  No pick generated")
+    assert pick is not None, "Debe generar Pick (away tiene edge positivo)"
+    assert pick.selection == "away", f"Should pick away, got {pick.selection}"
+    print(f"✅ Pick generado: {pick.selection}")
+    print(f"   Edge: {pick.edge:.4f}")
 
 
 def test_totals_over_value():
-    """Test 4: Totals - Over con valor"""
+    """Test 4: Totals - Over con valor
+    
+    SCENARIO:
+        Expected total = 2.8 goals
+        Line = 2.5 → Poisson P(>2.5) ≈ 53%
+        over_odds = 2.10 → implied 47.6%
+        → Over tiene edge positivo
+    """
     print("\n" + "="*60)
     print("TEST 4: Totals - Over con Valor")
     print("="*60)
     
     analysis = create_mock_analysis()
-    # Expected: 2.8 goals, Line: 2.5
-    # Over debería tener >50% prob
     odds = create_mock_odds(
         total_line=2.5,
-        over_odds=2.10,   # implica 47.6%
-        under_odds=1.80   # implica 55.6%
+        over_odds=2.10,   # implied 47.6% vs real ~53% → positivo
+        under_odds=1.80   # implied 55.6% vs real ~47% → negativo
     )
     
     market = TotalsMarket(min_edge=0.02)
     pick = market.evaluate(analysis, odds)
     
-    if pick:
-        print(f"✅ Pick generado: {pick.selection}")
-        print(f"   Odds: {pick.odds}")
-        print(f"   Probability: {pick.probability:.2%}")
-        print(f"   Edge: {pick.edge:.4f}")
-        assert "over" in pick.selection or "under" in pick.selection
-        assert pick.market == MarketType.TOTALS
-    else:
-        print("ℹ️  No pick generated")
+    assert pick is not None, "Debe generar Pick (over tiene edge positivo)"
+    assert "over" in pick.selection, f"Should pick over, got {pick.selection}"
+    assert pick.market == MarketType.TOTALS
+    
+    print(f"✅ Pick generado: {pick.selection}")
+    print(f"   Odds: {pick.odds}")
+    print(f"   Probability: {pick.probability:.2%}")
+    print(f"   Edge: {pick.edge:.4f}")
 
 
 def test_totals_under_value():
-    """Test 5: Totals - Under con valor"""
+    """Test 5: Totals - Under con valor
+    
+    SCENARIO:
+        Expected total = 2.8 goals
+        Line = 3.5 → Poisson P(≤3.5) ≈ 80%+ → under muy probable
+        under_odds = 2.20 → implied 45.5% vs real ~80%
+        → Under tiene edge muy positivo
+    """
     print("\n" + "="*60)
     print("TEST 5: Totals - Under con Valor")
     print("="*60)
     
     analysis = create_mock_analysis()
-    # Expected: 2.8, Line: 3.5 (alta)
-    # Under debería tener alta prob
     odds = create_mock_odds(
         total_line=3.5,
-        over_odds=1.70,   # implica 58.8%
-        under_odds=2.20   # implica 45.5%
+        over_odds=1.70,   # implied 58.8% vs real ~20% → negativo
+        under_odds=2.20   # implied 45.5% vs real ~80% → muy positivo
     )
     
     market = TotalsMarket(min_edge=0.02)
     pick = market.evaluate(analysis, odds)
     
-    if pick:
-        print(f"✅ Pick generado: {pick.selection}")
-        assert "under" in pick.selection, f"Should pick under, got {pick.selection}"
-        print(f"   Edge: {pick.edge:.4f}")
-    else:
-        print("ℹ️  No pick generated")
+    assert pick is not None, "Debe generar Pick (under tiene edge positivo)"
+    assert "under" in pick.selection, f"Should pick under, got {pick.selection}"
+    print(f"✅ Pick generado: {pick.selection}")
+    print(f"   Edge: {pick.edge:.4f}")
 
 
 def test_missing_odds():
-    """Test 6: Manejo de odds faltantes"""
+    """Test 6: Manejo de odds faltantes
+    
+    Si home_odds es None, el mercado debe evaluar los otros outcomes
+    sin explotar. Si ningún otro tiene valor → None es correcto.
+    """
     print("\n" + "="*60)
     print("TEST 6: Odds Faltantes")
     print("="*60)
@@ -203,12 +241,13 @@ def test_missing_odds():
     market = MoneylineMarket(min_edge=0.02)
     pick = market.evaluate(analysis, odds)
     
-    # Debería evaluar otros outcomes disponibles
+    # Con odds por default (draw=3.50, away=3.60), ningún outcome tiene edge positivo
+    # Lo importante es que no crash y que si hay pick, no sea "home"
     if pick:
         print(f"✅ Evaluó otros outcomes: {pick.selection}")
         assert pick.selection != "home"
     else:
-        print("✅ Correctly handled missing odds")
+        print("✅ Correctly handled missing odds (no value en otros outcomes)")
 
 
 def test_validation():

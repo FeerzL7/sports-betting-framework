@@ -30,6 +30,16 @@ class MoneylineMarket(Market):
     
     market_type = MarketType.MONEYLINE
     
+    # Mapeo flexible: outcome canónico → claves aceptadas en analysis.probabilities
+    # ProbabilityEngine.from_poisson produce "home_win"/"away_win"
+    # Algunos adapters podrían usar "home"/"away"
+    # El mercado acepta ambas sin que el core tenga que saber de qué deporte viene
+    PROB_KEY_MAP = {
+        "home": ["home", "home_win"],
+        "away": ["away", "away_win"],
+        "draw": ["draw"]
+    }
+    
     def __init__(self, min_edge: float = 0.02):
         """
         Args:
@@ -83,17 +93,12 @@ class MoneylineMarket(Market):
             best_pick = None
             best_edge = self.min_edge
             
-            # Map analysis probability keys to market outcome keys
-            prob_key_map = {
-                "home": ["home", "home_win"],
-                "away": ["away", "away_win"],
-                "draw": ["draw"]
-            }
-            
             for outcome in ["home", "away", "draw"]:
-                # Find probability with flexible key matching
+                # --- Flexible probability lookup ---
+                # analysis.probabilities puede usar "home_win" o "home"
+                # según qué adapter lo produjo. Nunca asumimos formato fijo.
                 real_prob = None
-                for prob_key in prob_key_map[outcome]:
+                for prob_key in self.PROB_KEY_MAP[outcome]:
                     if prob_key in real_probs:
                         real_prob = real_probs[prob_key]
                         break
@@ -101,12 +106,11 @@ class MoneylineMarket(Market):
                 if real_prob is None:
                     continue
                 
-                # Map outcome to odds key
-                odds_key = self._map_outcome_to_odds_key(outcome)
-                if odds_key not in market_odds or market_odds[odds_key] is None:
+                # --- Odds lookup (OddsData.get_market_odds ya normaliza a "home"/"away"/"draw") ---
+                if outcome not in market_odds or market_odds[outcome] is None:
                     continue
                 
-                outcome_odds = market_odds[odds_key]
+                outcome_odds = market_odds[outcome]
                 
                 # Calculate edge
                 edge = self.edge_calc.calculate(
@@ -157,18 +161,6 @@ class MoneylineMarket(Market):
             
             return best_pick
     
-    def _map_outcome_to_odds_key(self, outcome: str) -> str:
-        """
-        Map outcome name to odds data key
-        
-        outcome "home" → odds key "home_odds" in OddsData
-        outcome "draw" → odds key "draw_odds" in OddsData
-        outcome "away" → odds key "away_odds" in OddsData
-        """
-        # In OddsData.get_market_odds(), keys are already simplified
-        # to "home", "draw", "away"
-        return outcome
-    
     def _validate_inputs(self, analysis: GameAnalysis, odds: OddsData) -> bool:
         """Validate moneyline-specific inputs"""
         if not super()._validate_inputs(analysis, odds):
@@ -183,8 +175,9 @@ class MoneylineMarket(Market):
             return False
         
         # Check required outcomes (flexible key matching)
-        has_home = any(k in analysis.probabilities for k in ["home", "home_win"])
-        has_away = any(k in analysis.probabilities for k in ["away", "away_win"])
+        # Acepta "home" O "home_win", "away" O "away_win"
+        has_home = any(k in analysis.probabilities for k in self.PROB_KEY_MAP["home"])
+        has_away = any(k in analysis.probabilities for k in self.PROB_KEY_MAP["away"])
         
         if not (has_home and has_away):
             logger.warning(
