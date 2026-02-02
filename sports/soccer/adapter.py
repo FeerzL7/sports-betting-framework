@@ -42,25 +42,25 @@ logger = get_logger(__name__)
 class SoccerAdapter(SportAdapter):
     """
     Adapter para análisis de partidos de fútbol
-    
+
     Pipeline:
     API → Stats → xG → Form → Probabilities → GameAnalysis
     """
-    
+
     sport = Sport.SOCCER
     supported_leagues = list(SUPPORTED_SOCCER_LEAGUES.keys())
-    
+
     def __init__(self, api_key: str = None):
         """
         Args:
             api_key: API key para API-Football (opcional, usa config por default)
         """
         self.api_client = APIFootballClient(api_key)
-        
+
         # Calculators se crean por juego (cada liga puede tener baseline diferente)
         self.xg_calculator = None
         self.form_analyzer = FormAnalyzer()
-        
+
         logger.info(
             "SoccerAdapter initialized",
             extra={
@@ -68,35 +68,35 @@ class SoccerAdapter(SportAdapter):
                 "leagues": ", ".join(self.supported_leagues)
             }
         )
-    
+
     def fetch_games(self, date: str, league: str) -> List[Dict]:
         """
         Obtiene partidos desde API-Football
-        
+
         Args:
             date: "YYYY-MM-DD"
             league: "PL", "PD", "SA", etc.
-        
+
         Returns:
             Lista de raw game data
-        
+
         Raises:
             ValueError: Si league no soportada
             DataFetchError: Si API falla
         """
         self.validate_league(league)
-        
+
         logger.info(
             f"Fetching games for {league}",
             extra={"league": league, "date": date}
         )
-        
+
         perf = PerformanceLogger(logger, f"Fetch games: {league}")
-        
+
         with perf.track():
             try:
                 fixtures = self.api_client.get_fixtures(league, date)
-                
+
                 logger.info(
                     f"Found {len(fixtures)} fixtures",
                     extra={
@@ -105,9 +105,9 @@ class SoccerAdapter(SportAdapter):
                         "date": date
                     }
                 )
-                
+
                 return fixtures
-            
+
             except Exception as e:
                 logger.error(
                     f"Failed to fetch games for {league}",
@@ -119,17 +119,17 @@ class SoccerAdapter(SportAdapter):
                     date=date,
                     error=str(e)
                 )
-    
+
     def analyze_game(self, game_data: Dict) -> GameAnalysis:
         """
         Pipeline completo de análisis para un partido
-        
+
         Args:
             game_data: Dict con datos raw del API
-        
+
         Returns:
             GameAnalysis con todas las proyecciones y probabilidades
-        
+
         Pipeline:
         1. Extraer info básica (teams, fecha, league)
         2. Fetch stats de equipos
@@ -150,11 +150,11 @@ class SoccerAdapter(SportAdapter):
         start_time = datetime.fromisoformat(
             game_data["utcDate"].replace("Z", "+00:00")
         )
-        
-        logger.info("="*60)
+
+        logger.info("=" * 60)
         logger.info(f"Analyzing: {home_team} vs {away_team}")
-        logger.info("="*60)
-        
+        logger.info("=" * 60)
+
         with LogContext(
             logger,
             game_id=game_id,
@@ -163,15 +163,15 @@ class SoccerAdapter(SportAdapter):
         ):
             # Initialize xG calculator for this league
             self.xg_calculator = ExpectedGoalsCalculator(league_code)
-            
+
             perf = PerformanceLogger(logger, "Full Game Analysis")
-            
+
             with perf.track():
                 # 1. Fetch team stats
                 logger.info("Step 1: Fetching team stats")
                 home_stats = self.api_client.get_team_stats(home_id, league_code)
                 away_stats = self.api_client.get_team_stats(away_id, league_code)
-                
+
                 # 2. Fetch recent form
                 logger.info("Step 2: Fetching recent form")
                 home_form_matches = self.api_client.get_team_form(
@@ -182,21 +182,28 @@ class SoccerAdapter(SportAdapter):
                     away_id,
                     games=DEFAULT_SOCCER_CONFIG.form_window
                 )
-                
+
                 # 3. Calculate xG
                 logger.info("Step 3: Calculating xG")
-                
+
                 # Try advanced calculation first (with form data)
+                # calculate_advanced requiere team_id y opponent_id para
+                # leer correctamente los scores de partidos históricos
+                # independientemente de si jugaron home o away.
                 if home_form_matches and away_form_matches:
                     logger.debug("Using advanced xG calculation (form-weighted)")
                     home_xg = self.xg_calculator.calculate_advanced(
-                        home_form_matches,
-                        away_form_matches,
+                        team_form=home_form_matches,
+                        opponent_form=away_form_matches,
+                        team_id=home_id,
+                        opponent_id=away_id,
                         is_home=True
                     )
                     away_xg = self.xg_calculator.calculate_advanced(
-                        away_form_matches,
-                        home_form_matches,
+                        team_form=away_form_matches,
+                        opponent_form=home_form_matches,
+                        team_id=away_id,
+                        opponent_id=home_id,
                         is_home=False
                     )
                 else:
@@ -211,11 +218,11 @@ class SoccerAdapter(SportAdapter):
                         home_stats,
                         is_home=False
                     )
-                
+
                 logger.info(
                     f"xG: {home_team} {home_xg:.2f} - {away_xg:.2f} {away_team}"
                 )
-                
+
                 # 4. Analyze form
                 logger.info("Step 4: Analyzing team form")
                 home_form = self.form_analyzer.analyze_team_form(
@@ -226,12 +233,12 @@ class SoccerAdapter(SportAdapter):
                     away_form_matches,
                     away_id
                 )
-                
+
                 form_comparison = self.form_analyzer.compare_forms(
                     home_form,
                     away_form
                 )
-                
+
                 # 5. Calculate probabilities (Poisson distribution)
                 logger.info("Step 5: Calculating match probabilities")
                 probabilities = ProbabilityEngine.from_poisson(
@@ -240,20 +247,20 @@ class SoccerAdapter(SportAdapter):
                     max_score=DEFAULT_SOCCER_CONFIG.max_score_simulation,
                     include_draw=True
                 )
-                
+
                 logger.info(
                     f"Probabilities: Home {probabilities['home_win']:.1%} | "
                     f"Draw {probabilities['draw']:.1%} | "
                     f"Away {probabilities['away_win']:.1%}"
                 )
-                
+
                 # Validate probabilities sum to ~1.0
                 if not ProbabilityEngine.validate_probabilities(probabilities):
                     logger.error(
                         "Probabilities don't sum to 1.0",
                         extra={"probabilities": probabilities}
                     )
-                
+
                 # 6. Calculate confidence
                 logger.info("Step 6: Calculating confidence score")
                 confidence = self.calculate_confidence(
@@ -267,12 +274,12 @@ class SoccerAdapter(SportAdapter):
                         "away_xg": away_xg
                     }
                 )
-                
+
                 logger.info(f"Confidence: {confidence:.1%}")
-                
+
                 # 7. Build GameAnalysis
                 logger.info("Step 7: Building GameAnalysis")
-                
+
                 analysis = GameAnalysis(
                     sport=Sport.SOCCER,
                     league=league_code,
@@ -296,13 +303,13 @@ class SoccerAdapter(SportAdapter):
                         "away_stats": away_stats
                     }
                 )
-                
-                logger.info("="*60)
+
+                logger.info("=" * 60)
                 logger.info("Analysis complete")
-                logger.info("="*60)
-                
+                logger.info("=" * 60)
+
                 return analysis
-    
+
     def calculate_confidence(
         self,
         game_data: Dict,
@@ -310,30 +317,30 @@ class SoccerAdapter(SportAdapter):
     ) -> float:
         """
         Calcula confidence score basado en calidad de datos
-        
+
         Factores que REDUCEN confidence:
         - Sample size pequeño (< 5 juegos de form)
         - Stats incompletas (games_played = 0)
         - xG extremos (muy altos o muy bajos)
         - Form muy inconsistente
-        
+
         Args:
             game_data: Datos raw del juego
             analysis_data: Stats calculadas
-        
+
         Returns:
             Float entre 0-1 (1 = máxima confianza)
         """
         logger.debug("Calculating confidence score")
-        
+
         confidence = 1.0
-        
+
         # Factor 1: Sample size de form
         home_form_games = analysis_data["home_form"]["games_analyzed"]
         away_form_games = analysis_data["away_form"]["games_analyzed"]
-        
+
         min_form_games = DEFAULT_SOCCER_CONFIG.min_games_for_confidence
-        
+
         if home_form_games < min_form_games:
             reduction = (min_form_games - home_form_games) * \
                        DEFAULT_SOCCER_CONFIG.confidence_penalty_per_missing_game
@@ -342,7 +349,7 @@ class SoccerAdapter(SportAdapter):
                 f"Home form penalty: {reduction:.2%}",
                 extra={"home_form_games": home_form_games}
             )
-        
+
         if away_form_games < min_form_games:
             reduction = (min_form_games - away_form_games) * \
                        DEFAULT_SOCCER_CONFIG.confidence_penalty_per_missing_game
@@ -351,45 +358,45 @@ class SoccerAdapter(SportAdapter):
                 f"Away form penalty: {reduction:.2%}",
                 extra={"away_form_games": away_form_games}
             )
-        
+
         # Factor 2: Stats quality (si games_played = 0, son defaults)
         if analysis_data["home_stats"]["games_played"] == 0:
             confidence *= 0.70
             logger.debug("Home stats penalty: 30% (using defaults)")
-        
+
         if analysis_data["away_stats"]["games_played"] == 0:
             confidence *= 0.70
             logger.debug("Away stats penalty: 30% (using defaults)")
-        
+
         # Factor 3: xG extremos (fuera de rango típico)
         home_xg = analysis_data["home_xg"]
         away_xg = analysis_data["away_xg"]
-        
+
         if home_xg > 3.5 or home_xg < 0.5:
             confidence *= 0.90
             logger.debug(
                 f"Extreme home xG penalty: 10%",
                 extra={"home_xg": home_xg}
             )
-        
+
         if away_xg > 3.5 or away_xg < 0.5:
             confidence *= 0.90
             logger.debug(
                 f"Extreme away xG penalty: 10%",
                 extra={"away_xg": away_xg}
             )
-        
+
         # Factor 4: Form strength muy baja (ambos equipos inconsistentes)
         home_strength = analysis_data["home_form"]["form_strength"]
         away_strength = analysis_data["away_form"]["form_strength"]
-        
+
         if home_strength < 0.3 and away_strength < 0.3:
             confidence *= 0.85
             logger.debug("Both teams poor form penalty: 15%")
-        
+
         # Clip final
         confidence = max(0.1, min(confidence, 1.0))
-        
+
         logger.info(
             f"Final confidence: {confidence:.2%}",
             extra={
@@ -398,9 +405,9 @@ class SoccerAdapter(SportAdapter):
                 "away_form_games": away_form_games
             }
         )
-        
+
         return round(confidence, 2)
-    
+
     def get_supported_markets(self) -> List[str]:
         """Mercados soportados para soccer"""
         return [

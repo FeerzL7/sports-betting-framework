@@ -50,17 +50,17 @@ from utils import get_logger, PerformanceLogger
 logger = get_logger(__name__)
 
 
-# ============================================================================
+# ============================================================
 # OUTPUT MODELS
 # Estructuras que define el shape del output JSON.
 # Estables → la UI puede depender de estos contratos.
-# ============================================================================
+# ============================================================
 
 @dataclass
 class PipelineResult:
     """
     Output final del Orchestrator.
-    
+
     Este es el contrato que cualquier UI futura consume.
     Cambiar esta estructura = breaking change.
     """
@@ -70,19 +70,19 @@ class PipelineResult:
     league: str
     date: str
     timestamp: datetime = field(default_factory=datetime.now)
-    
+
     # Picks aprobados (listos para apostar)
     approved_picks: List[Dict] = field(default_factory=list)
-    
+
     # Picks rechazados por riesgo (con razón)
     rejected_picks: List[Dict] = field(default_factory=list)
-    
+
     # Status del portfolio
     risk_status: Dict = field(default_factory=dict)
-    
+
     # Métricas del pipeline (para monitoring/debugging)
     pipeline_stats: Dict = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict:
         """Serializa a Dict JSON-ready"""
         return {
@@ -98,14 +98,14 @@ class PipelineResult:
         }
 
 
-# ============================================================================
+# ============================================================
 # ORCHESTRATOR
-# ============================================================================
+# ============================================================
 
 class Orchestrator:
     """
     Pipeline central del sistema de betting.
-    
+
     INYECCIÓN DE DEPENDENCIAS:
     Todas las dependencias se reciben en __init__.
     El Orchestrator no instancia nada por sí mismo.
@@ -113,7 +113,7 @@ class Orchestrator:
     - Usar FakeOddsProvider en tests
     - Swappear adapters sin tocar este código
     - Testear cada capa aisladamente
-    
+
     EJEMPLO BÁSICO:
         >>> from sports.soccer.adapter import SoccerAdapter
         >>> from providers import FakeOddsProvider
@@ -128,7 +128,7 @@ class Orchestrator:
         >>> result = orchestrator.run(league="PL", date="2025-01-30")
         >>> print(result.to_dict())
     """
-    
+
     def __init__(
         self,
         adapter: SportAdapter,
@@ -151,18 +151,18 @@ class Orchestrator:
         self.odds_provider = odds_provider
         self.markets = markets
         self.bankroll = bankroll
-        
+
         # Core engines
         kelly_cfg = kelly_config or DEFAULT_KELLY_CONFIG
         risk_cfg = risk_config or DEFAULT_RISK_CONFIG
-        
+
         self.kelly = KellyCalculator(
             fraction=kelly_cfg.fraction,
             max_stake_pct=kelly_cfg.max_stake_pct,
             min_edge=kelly_cfg.min_edge,
             bankroll=bankroll
         )
-        
+
         self.risk_manager = RiskManager(
             limits=RiskLimits(
                 max_total_exposure=risk_cfg.max_total_exposure,
@@ -173,7 +173,7 @@ class Orchestrator:
             ),
             bankroll=bankroll
         )
-        
+
         logger.info(
             "Orchestrator initialized",
             extra={
@@ -184,11 +184,11 @@ class Orchestrator:
                 "max_exposure": risk_cfg.max_total_exposure
             }
         )
-    
+
     # ================================================================
     # PUBLIC: Main entry point
     # ================================================================
-    
+
     def run(
         self,
         league: str,
@@ -196,28 +196,28 @@ class Orchestrator:
     ) -> PipelineResult:
         """
         Ejecuta el pipeline completo.
-        
+
         Args:
             league: Código de liga ("PL", "PD", etc.)
             date: "YYYY-MM-DD" (None = hoy)
-        
+
         Returns:
             PipelineResult con picks aprobados, rechazados, y stats
-        
+
         PIPELINE:
             fetch → match → analyze → evaluate → size → filter → output
         """
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
-        
+
         run_id = f"{self.adapter.sport.value}_{league}_{date}_{datetime.now().strftime('%H%M%S')}"
-        
+
         logger.info("=" * 70)
         logger.info(f"PIPELINE START: {run_id}")
         logger.info("=" * 70)
-        
+
         perf = PerformanceLogger(logger, f"Full Pipeline: {run_id}")
-        
+
         # Acumuladores de stats
         stats = {
             "games_fetched": 0,
@@ -229,58 +229,54 @@ class Orchestrator:
             "picks_rejected": 0,
             "errors": []
         }
-        
+
         approved_picks = []
         rejected_picks = []
-        
+
         with perf.track():
             # ----------------------------------------------------------
-            # STEP 1: Fetch games + odds (en paralelo conceptualmente,
-            # pero secuencial para mantener simplicidad. En futuro:
-            # asyncio para hacer ambos simultáneamente)
+            # STEP 1: Fetch games + odds
             # ----------------------------------------------------------
             logger.info("[1/6] Fetching games and odds...")
-            
+
             raw_games = self._step_fetch_games(league, date, stats)
             odds_list = self._step_fetch_odds(league, date, stats)
-            
+
             if not raw_games:
                 logger.warning("No games found. Pipeline ends early.")
                 return self._build_result(
                     run_id, league, date, approved_picks, rejected_picks, stats
                 )
-            
+
             # ----------------------------------------------------------
             # STEP 2: Match games ↔ odds
             # ----------------------------------------------------------
             logger.info("[2/6] Matching games with odds...")
-            
+
             matched_pairs = self._step_match_games(raw_games, odds_list, stats)
-            
+
             if not matched_pairs:
                 logger.warning("No games matched with odds. Pipeline ends early.")
                 return self._build_result(
                     run_id, league, date, approved_picks, rejected_picks, stats
                 )
-            
+
             # ----------------------------------------------------------
             # STEP 3: Analyze + Evaluate + Size + Filter
-            # (por juego, secuencial — cada juego es independiente)
             # ----------------------------------------------------------
             logger.info("[3/6] Analyzing games and evaluating markets...")
-            
+
             for game_data, odds_data in matched_pairs:
                 game_picks = self._process_single_game(
                     game_data, odds_data, stats
                 )
-                
-                # --------------------------------------------------
-                # STEP 4: Risk filter (por pick, con contexto del
-                # portfolio creciente)
-                # --------------------------------------------------
+
+                # ------------------------------------------------------
+                # STEP 4: Risk filter
+                # ------------------------------------------------------
                 for pick in game_picks:
                     approved, reason = self._step_filter_risk(pick, stats)
-                    
+
                     if approved:
                         approved_picks.append(pick.to_dict())
                     else:
@@ -288,34 +284,34 @@ class Orchestrator:
                             **pick.to_dict(),
                             "rejection_reason": reason
                         })
-            
+
             logger.info(
                 f"[4/6] Risk filter complete: "
                 f"{stats['picks_approved']} approved, "
                 f"{stats['picks_rejected']} rejected"
             )
-        
+
         # ----------------------------------------------------------
         # STEP 5: Build output
         # ----------------------------------------------------------
         logger.info("[5/6] Building output...")
-        
+
         result = self._build_result(
             run_id, league, date, approved_picks, rejected_picks, stats
         )
-        
+
         logger.info("=" * 70)
         logger.info(f"PIPELINE COMPLETE: {run_id}")
         logger.info(f"  Approved picks: {stats['picks_approved']}")
         logger.info(f"  Total exposure: {result.risk_status.get('total_exposure', 0):.1f}%")
         logger.info("=" * 70)
-        
+
         return result
-    
+
     # ================================================================
     # PRIVATE: Pipeline steps
     # ================================================================
-    
+
     def _step_fetch_games(
         self,
         league: str,
@@ -332,7 +328,7 @@ class Orchestrator:
             stats["errors"].append(f"fetch_games: {e}")
             logger.error(f"  Failed to fetch games: {e}")
             return []
-    
+
     def _step_fetch_odds(
         self,
         league: str,
@@ -351,7 +347,7 @@ class Orchestrator:
             stats["errors"].append(f"fetch_odds: {e}")
             logger.error(f"  Failed to fetch odds: {e}")
             return []
-    
+
     def _step_match_games(
         self,
         raw_games: List[Dict],
@@ -360,43 +356,46 @@ class Orchestrator:
     ) -> List[Tuple[Dict, OddsData]]:
         """
         Step 2: Conecta partidos del adapter con odds del provider.
-        
-        PROBLEMA:
-        - Adapter produce: game_data con homeTeam.name = "Real Madrid CF"
-        - Provider produce: OddsData con game_id generado desde sus propios nombres
-        
-        SOLUCIÓN:
-        Crear un índice de odds normalizado por (home_normalized, away_normalized).
-        Luego buscar cada game del adapter en ese índice.
-        
-        Si el provider es FakeOddsProvider, los game_ids ya están en formato
-        canónico. Si es OddsAPIProvider, los game_ids están normalizados
-        internamente.
-        
-        Para FakeOddsProvider: asignamos el game_id del fake directamente
-        al GameAnalysis (el fake ya tiene el game_id correcto).
-        
+
+        DOS ESTRATEGIAS según el provider:
+
+        1) FakeOddsProvider → matching posicional.
+           Los scenarios están diseñados para coincidir 1:1 con los
+           games que retorna el adapter. Pareamos por índice.
+
+        2) Provider real (producción) → matching por nombre normalizado.
+           El adapter retorna "Real Madrid CF", el provider retorna
+           "real madrid". Construimos un índice normalizado de odds
+           y buscamos cada game del adapter en ese índice.
+
+        POR QUÉ type().__name__ y no isinstance():
+        No importamos FakeOddsProvider aquí. Hacerlo creería un
+        acoplamiento Orchestrator → implementación concreta de provider,
+        lo cual rompe el principio de inyección de dependencia.
+        El check por nombre de clase es la forma más ligera de
+        distinguir test doubles de providers reales sin importar nada.
+
         Returns:
             Lista de (game_data_con_game_id_asignado, OddsData) pareados
         """
         matched = []
-        
-        # Si hay exactamente tantos odds como games, y el provider es Fake,
-        # pareamos por posición (el scenario está diseñado así)
-        # En producción, usamos matching por nombre normalizado
-        
-        if isinstance(self.odds_provider, _FakeProviderCheck):
-            # Matching por posición para FakeOddsProvider
-            # (los scenarios están diseñados para coincidir 1:1)
+        is_fake = type(self.odds_provider).__name__ == "FakeOddsProvider"
+
+        if is_fake:
+            # Matching posicional para test doubles deterministas
             for i, game in enumerate(raw_games):
                 if i < len(odds_list):
-                    # Asignar el game_id del odds al game_data
                     game["_matched_odds_id"] = odds_list[i].game_id
                     matched.append((game, odds_list[i]))
+
+            logger.info(
+                f"  Matched {len(matched)}/{len(raw_games)} games (FakeProvider positional)"
+            )
+
         else:
-            # Matching por nombre normalizado (producción)
+            # Producción: matching por nombre normalizado
             odds_index = self._build_odds_index(odds_list)
-            
+
             for game in raw_games:
                 home_norm = self._normalize_name(
                     game.get("homeTeam", {}).get("name", "")
@@ -404,27 +403,29 @@ class Orchestrator:
                 away_norm = self._normalize_name(
                     game.get("awayTeam", {}).get("name", "")
                 )
-                
-                # Buscar en índice (home, away) o (away, home)
+
+                # Buscar en índice en ambas direcciones
                 key1 = (home_norm, away_norm)
                 key2 = (away_norm, home_norm)
-                
+
                 odds_data = odds_index.get(key1) or odds_index.get(key2)
-                
+
                 if odds_data:
                     game["_matched_odds_id"] = odds_data.game_id
                     matched.append((game, odds_data))
                 else:
                     logger.debug(
-                        f"No odds match for {game.get('homeTeam', {}).get('name')} "
+                        f"No odds match: {game.get('homeTeam', {}).get('name')} "
                         f"vs {game.get('awayTeam', {}).get('name')}"
                     )
-        
+
+            logger.info(
+                f"  Matched {len(matched)}/{len(raw_games)} games (normalized)"
+            )
+
         stats["games_matched"] = len(matched)
-        logger.info(f"  Matched {len(matched)}/{len(raw_games)} games with odds")
-        
         return matched
-    
+
     def _process_single_game(
         self,
         game_data: Dict,
@@ -433,7 +434,7 @@ class Orchestrator:
     ) -> List[Pick]:
         """
         Analiza un juego y evalúa todos los mercados.
-        
+
         Retorna lista de picks con stake calculado (sin filtro de riesgo aún).
         """
         # --- Analyze ---
@@ -446,7 +447,7 @@ class Orchestrator:
             )
             logger.error(f"  Failed to analyze game: {e}")
             return []
-        
+
         # Asignar game_id consistente (del odds match)
         # Esto asegura que analysis.game_id == odds_data.game_id
         # para que RiskManager pueda detectar correlaciones
@@ -464,26 +465,26 @@ class Orchestrator:
             model_version=analysis.model_version,
             context=analysis.context
         )
-        
-        # Also update odds game_id to match (in case of FakeProvider)
+
+        # Sincronizar game_id en odds también
         odds_data.game_id = matched_game_id
-        
+
         logger.info(
             f"  Game: {analysis.home_team} vs {analysis.away_team} "
             f"(confidence: {analysis.confidence:.0%})"
         )
-        
+
         # --- Evaluate markets ---
         raw_picks = self._step_evaluate_markets(analysis, odds_data, stats)
-        
+
         if not raw_picks:
             return []
-        
+
         # --- Size stakes (Kelly con correlaciones) ---
         sized_picks = self._step_size_stakes(raw_picks, stats)
-        
+
         return sized_picks
-    
+
     def _step_evaluate_markets(
         self,
         analysis: GameAnalysis,
@@ -492,16 +493,16 @@ class Orchestrator:
     ) -> List[Pick]:
         """
         Step 3: Evalúa cada market registrado.
-        
+
         Cada market retorna Pick o None.
         Colectamos los que tienen valor.
         """
         picks = []
-        
+
         for market in self.markets:
             try:
                 pick = market.evaluate(analysis, odds_data)
-                
+
                 if pick is not None:
                     picks.append(pick)
                     stats["picks_found"] += 1
@@ -514,7 +515,7 @@ class Orchestrator:
                     logger.debug(
                         f"    No value in {market.market_type.value}"
                     )
-            
+
             except Exception as e:
                 stats["errors"].append(
                     f"market.evaluate ({market.market_type.value}): {e}"
@@ -522,9 +523,9 @@ class Orchestrator:
                 logger.error(
                     f"    Market evaluation failed ({market.market_type.value}): {e}"
                 )
-        
+
         return picks
-    
+
     def _step_size_stakes(
         self,
         picks: List[Pick],
@@ -532,10 +533,10 @@ class Orchestrator:
     ) -> List[Pick]:
         """
         Step 4: Calcula stakes usando Kelly con correlaciones.
-        
+
         Si hay múltiples picks del mismo juego, el segundo tiene
         correlación con el primero → stake reducido automáticamente.
-        
+
         Usa KellyCalculator.calculate_batch() que maneja esto.
         """
         # Preparar input para calculate_batch
@@ -547,23 +548,22 @@ class Orchestrator:
                 "odds": pick.odds,
                 "confidence": pick.confidence
             })
-        
+
         # Extraer correlaciones entre picks del mismo juego
         correlations = self._extract_correlations(picks)
-        
+
         # Batch sizing
         kelly_results: Dict[str, KellyResult] = self.kelly.calculate_batch(
             batch_input, correlations
         )
-        
+
         # Aplicar stakes a los picks originales
         sized_picks = []
         for pick in picks:
             pick_id = f"{pick.game_id}_{pick.market.value}_{pick.selection}"
             kelly_result = kelly_results.get(pick_id)
-            
+
             if kelly_result and kelly_result.stake_pct > 0:
-                # Crear nuevo Pick con stake aplicado
                 sized_pick = Pick(
                     game_id=pick.game_id,
                     market=pick.market,
@@ -576,7 +576,7 @@ class Orchestrator:
                     stake_amount=kelly_result.stake_amount
                 )
                 sized_picks.append(sized_pick)
-                
+
                 logger.debug(
                     f"    Sized: {pick_id} → "
                     f"{kelly_result.stake_pct:.2f}% "
@@ -586,9 +586,9 @@ class Orchestrator:
                 logger.debug(
                     f"    Filtered out (stake=0): {pick_id}"
                 )
-        
+
         return sized_picks
-    
+
     def _step_filter_risk(
         self,
         pick: Pick,
@@ -596,12 +596,12 @@ class Orchestrator:
     ) -> Tuple[bool, Optional[str]]:
         """
         Step 5: Filtro de riesgo por pick.
-        
+
         El RiskManager tiene estado (portfolio creciente),
         así que cada pick se evalúa en contexto de los anteriores.
         """
         can_add, reason = self.risk_manager.can_add_pick(pick)
-        
+
         if can_add:
             self.risk_manager.add_pick(pick)
             stats["picks_approved"] += 1
@@ -614,13 +614,13 @@ class Orchestrator:
             logger.info(
                 f"    ❌ Rejected: {pick.selection} — {reason}"
             )
-        
+
         return can_add, reason
-    
+
     # ================================================================
     # PRIVATE: Output builder
     # ================================================================
-    
+
     def _build_result(
         self,
         run_id: str,
@@ -632,7 +632,7 @@ class Orchestrator:
     ) -> PipelineResult:
         """Construye el PipelineResult final."""
         risk_status = self.risk_manager.get_risk_status()
-        
+
         return PipelineResult(
             run_id=run_id,
             sport=self.adapter.sport,
@@ -652,147 +652,84 @@ class Orchestrator:
             },
             pipeline_stats=stats
         )
-    
+
     # ================================================================
     # PRIVATE: Helpers
     # ================================================================
-    
+
     def _extract_correlations(self, picks: List[Pick]) -> Dict[str, float]:
         """
         Extrae correlaciones entre picks del mismo juego.
-        
+
         Usa la matriz MARKET_CORRELATION de RiskManager para
         calcular la correlación entre cada par.
-        
+
         Returns:
             Dict con format "pick1_id-pick2_id": correlation
             Compatible con KellyCalculator.calculate_batch()
         """
         correlations = {}
-        
+
         for i in range(len(picks)):
             for j in range(i + 1, len(picks)):
                 pick1 = picks[i]
                 pick2 = picks[j]
-                
+
                 # Solo calcular si mismo juego
                 if pick1.game_id != pick2.game_id:
                     continue
-                
+
                 corr = self.risk_manager.calculate_correlation(pick1, pick2)
-                
+
                 if corr > 0:
                     id1 = f"{pick1.game_id}_{pick1.market.value}_{pick1.selection}"
                     id2 = f"{pick2.game_id}_{pick2.market.value}_{pick2.selection}"
                     correlations[f"{id1}-{id2}"] = corr
-                    
+
                     logger.debug(
                         f"    Correlation: {pick1.market.value} ↔ "
                         f"{pick2.market.value} = {corr:.2f}"
                     )
-        
+
         return correlations
-    
+
     def _build_odds_index(
         self,
         odds_list: List[OddsData]
     ) -> Dict[Tuple[str, str], OddsData]:
         """
         Construye índice de odds por (home_normalized, away_normalized).
-        
+
         OddsData no tiene home_team/away_team directamente, pero su
         game_id en producción tiene formato "{sport}_{home}_{away}".
         Parseamos eso para construir el índice.
         """
         index = {}
-        
+
         for odds in odds_list:
             # Parsear game_id: "soccer_real madrid_barcelona"
             parts = odds.game_id.split("_", 2)  # Máximo 3 partes
-            
+
             if len(parts) >= 3:
-                # sport_home_away
                 home = parts[1]
                 away = parts[2]
                 index[(home, away)] = odds
             else:
-                # Fallback: usar game_id completo como key
                 logger.debug(
                     f"Could not parse game_id for indexing: {odds.game_id}"
                 )
-        
+
         return index
-    
+
     @staticmethod
     def _normalize_name(name: str) -> str:
         """Normaliza nombre de equipo para matching."""
         normalized = name.strip().lower()
-        
+
         # Remover sufijos comunes
         suffixes = [" cf", " fc", " afc", " s.a.d.", " ltd", " utd"]
         for suffix in suffixes:
             if normalized.endswith(suffix):
                 normalized = normalized[:-len(suffix)].strip()
-        
+
         return normalized
-
-
-# ============================================================================
-# HELPER: Tipo-check para FakeOddsProvider sin import circular
-# ============================================================================
-
-def _FakeProviderCheck(provider):
-    """Verifica si el provider es FakeOddsProvider sin importar directamente."""
-    return type(provider).__name__ == "FakeOddsProvider"
-
-
-# Monkeypatch: usar como función en isinstance-like check
-# El matching real usa esta lógica:
-_original_match = Orchestrator._step_match_games
-
-def _patched_match(self, raw_games, odds_list, stats):
-    """Override que detecta FakeOddsProvider por nombre de clase."""
-    # Si es FakeProvider, pareamos por posición (scenario diseñado así)
-    if type(self.odds_provider).__name__ == "FakeOddsProvider":
-        matched = []
-        for i, game in enumerate(raw_games):
-            if i < len(odds_list):
-                game["_matched_odds_id"] = odds_list[i].game_id
-                matched.append((game, odds_list[i]))
-        
-        stats["games_matched"] = len(matched)
-        logger.info(f"  Matched {len(matched)}/{len(raw_games)} games (FakeProvider positional)")
-        return matched
-    
-    # Producción: matching por nombre normalizado
-    odds_index = self._build_odds_index(odds_list)
-    matched = []
-    
-    for game in raw_games:
-        home_norm = Orchestrator._normalize_name(
-            game.get("homeTeam", {}).get("name", "")
-        )
-        away_norm = Orchestrator._normalize_name(
-            game.get("awayTeam", {}).get("name", "")
-        )
-        
-        key1 = (home_norm, away_norm)
-        key2 = (away_norm, home_norm)
-        
-        odds_data = odds_index.get(key1) or odds_index.get(key2)
-        
-        if odds_data:
-            game["_matched_odds_id"] = odds_data.game_id
-            matched.append((game, odds_data))
-        else:
-            logger.debug(
-                f"No odds match: {game.get('homeTeam', {}).get('name')} "
-                f"vs {game.get('awayTeam', {}).get('name')}"
-            )
-    
-    stats["games_matched"] = len(matched)
-    logger.info(f"  Matched {len(matched)}/{len(raw_games)} games (normalized)")
-    return matched
-
-# Aplicar el matching real (reemplaza el stub con isinstance)
-Orchestrator._step_match_games = _patched_match
