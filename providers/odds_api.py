@@ -82,6 +82,7 @@ class OddsAPIProvider(OddsProviderBase):
     """
 
     provider_name = "OddsAPIProvider"
+    is_test_double = False  # Production provider — always False
 
     def __init__(self, api_key: Optional[str] = None):
         """

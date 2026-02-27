@@ -35,4 +35,4 @@ Thumbs.db
 # Test artifacts
 .pytest_cache/
 .coverage
-htmlcov/
+htmlcov/config/api_keys.py

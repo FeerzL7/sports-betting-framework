@@ -29,7 +29,13 @@ class OddsProviderBase(ABC):
     """
     
     provider_name: str
-    
+
+    # Set to True in test doubles (FakeOddsProvider).
+    # Allows the Orchestrator to choose matching strategy without
+    # coupling to any concrete class name.
+    # REGLA: providers reales NUNCA deben sobreescribir esto a True.
+    is_test_double: bool = False
+
     @abstractmethod
     def get_odds(
         self,

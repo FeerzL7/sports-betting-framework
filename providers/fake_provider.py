@@ -149,7 +149,8 @@ class FakeOddsProvider(OddsProviderBase):
     """
     
     provider_name = "FakeOddsProvider"
-    
+    is_test_double = True  # Signals Orchestrator to use positional matching
+
     def __init__(self, scenario: str = "value_exists"):
         if scenario not in SCENARIOS:
             raise ValueError(

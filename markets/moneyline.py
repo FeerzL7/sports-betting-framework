@@ -112,13 +112,19 @@ class MoneylineMarket(Market):
                 
                 outcome_odds = market_odds[outcome]
                 
-                # Calculate edge
+                # --- Vig removal: pasar todas las odds del mercado ---
+                # EdgeCalculator calculará la fair odds sin vig para este
+                # outcome antes de comparar contra nuestra probabilidad real.
+                all_ml_odds = odds.get_all_moneyline_odds()
+
+                # Calculate edge (con vig removal si se configuró)
                 edge = self.edge_calc.calculate(
                     real_prob,
                     outcome_odds,
-                    self.market_type
+                    self.market_type,
+                    all_market_odds=all_ml_odds if all_ml_odds else None
                 )
-                
+
                 # Calculate EV for logging
                 ev = self.edge_calc.calculate_expected_value(
                     real_prob,

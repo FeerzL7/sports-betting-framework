@@ -122,6 +122,9 @@ class TotalsMarket(Market):
                 f"Probabilities: Over={over_prob:.2%}, Under={under_prob:.2%}"
             )
 
+            # Vig removal: pasar todas las odds del mercado a EdgeCalculator
+            all_totals_odds = odds.get_all_totals_odds()
+
             # Evaluate both sides
             picks = []
 
@@ -129,7 +132,8 @@ class TotalsMarket(Market):
             over_edge = self.edge_calc.calculate(
                 over_prob,
                 over_odds,
-                self.market_type
+                self.market_type,
+                all_market_odds=all_totals_odds if all_totals_odds else None
             )
             over_ev = self.edge_calc.calculate_expected_value(over_prob, over_odds)
 
@@ -145,7 +149,8 @@ class TotalsMarket(Market):
             under_edge = self.edge_calc.calculate(
                 under_prob,
                 under_odds,
-                self.market_type
+                self.market_type,
+                all_market_odds=all_totals_odds if all_totals_odds else None
             )
             under_ev = self.edge_calc.calculate_expected_value(under_prob, under_odds)
 
